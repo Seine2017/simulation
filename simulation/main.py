@@ -63,6 +63,19 @@ class Differentiator(object):
     self.prev = x
     return deriv
 
+class VectorDifferentiator(object):
+  def __init__(self):
+    self.prev = (0.0, 0.0, 0.0)
+
+  def update(self, x, dt):
+    deriv = (
+      (x[0] - self.prev[0]) / dt,
+      (x[1] - self.prev[1]) / dt,
+      (x[2] - self.prev[2]) / dt,
+    )
+    self.prev = x
+    return deriv
+
 class Integrator(object):
   def __init__(self):
     self.integral = 0.0
@@ -136,64 +149,73 @@ class Controller(object):
 
     return tuple(duty_cycles)
 
+class Simulation(object):
+  def __init__(self):
+    self.world = ode.World()
+    self.world.setGravity((0.0, -9.81, 0.0))
+
+    self.drone = ode.Body(self.world)
+    drone_mass = ode.Mass()
+    drone_mass.setSphere(150, 0.01) # model as a sphere with a radius of 10cm
+    drone_mass.adjust(0.700) # adjust mass to be exactly 700g
+    self.drone.setMass(drone_mass)
+
+    self.drone.setPosition((0.0, 0.0, 0.0))
+    #self.drone.setQuaternion((0.8, 0.0, 0.0, -0.2))
+
+    self.controller = Controller(Trajectory())
+
+    self.vel_d = VectorDifferentiator()
+
+  def update(self, dt):
+    vel = self.drone.getLinearVel()
+    avel = self.drone.getAngularVel()
+
+    # Estimate the acceleration and angular acceleration.
+    accel = self.vel_d.update(vel, dt)
+
+    # Take sensor readings.
+    magneto = self.drone.vectorFromWorld((1.0, 0.0, 0.0))
+    readings = SensorReadings(self.drone.vectorFromWorld(accel), self.drone.vectorFromWorld(avel), magneto, dt)
+
+    # Run control algorithm.
+    rotor_duty_cycles = self.controller.update(readings, dt, self.drone)
+
+    # Apply rotor thrust to drone.
+    for duty_cycle, displacement in zip(rotor_duty_cycles, rotor_displacements):
+      # Thrust is 0.240*9.81 N at 50% throttle
+      thrust = 4.7088*duty_cycle
+      self.drone.addRelForceAtRelPos((0.0, thrust, 0.0), displacement)
+
+    # Apply drag to drone.
+    drag_factor = -0.1
+    self.drone.addForce((vel[0]*drag_factor, vel[1]*drag_factor, vel[2]*drag_factor))
+
+    self.world.step(dt)
+
+    return rotor_duty_cycles
+
 def main():
-  world = ode.World()
-  world.setGravity((0.0, -9.81, 0.0))
-
-  drone = ode.Body(world)
-  drone_mass = ode.Mass()
-  drone_mass.setSphere(150, 0.01) # model as a sphere with a radius of 10cm
-  drone_mass.adjust(0.700) # adjust mass to be exactly 700g
-  drone.setMass(drone_mass)
-
-  drone.setPosition((0.0, 0.0, 0.0))
-  #drone.setQuaternion((0.8, 0.0, 0.0, -0.2))
-
-  controller = Controller(Trajectory())
+  sim = Simulation()
 
   imax = 60
   jmax = 100
   dt = 1e-3
-  prev_vel = (0.0, 0.0, 0.0)
   rotor_duty_cycles = (0.0, 0.0, 0.0, 0.0)
   for i in range(imax):
-    pos = drone.getPosition()
-    vel = drone.getLinearVel()
-    quaternion = drone.getQuaternion()
-    forward = drone.vectorToWorld((1.0, 0.0, 0.0))
-    up = drone.vectorToWorld((0.0, 1.0, 0.0))
-    avel = drone.getAngularVel()
+    pos = sim.drone.getPosition()
+    vel = sim.drone.getLinearVel()
+    quaternion = sim.drone.getQuaternion()
+    forward = sim.drone.vectorToWorld((1.0, 0.0, 0.0))
+    up = sim.drone.vectorToWorld((0.0, 1.0, 0.0))
+    avel = sim.drone.getAngularVel()
     roll = quaternion_roll(quaternion)
     pitch = quaternion_pitch(quaternion)
     yaw = quaternion_yaw(quaternion)
     print "t=%7.4f x=(%7.3f,%7.3f,%7.3f) v=(%7.3f,%7.3f,%7.3f) roll=%7.3f pitch=%7.3f yaw=%7.3f av=(%7.3f,%7.3f,%7.3f) out=(%.3f,%.3f,%.3f,%.3f)" % (dt*i*jmax, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], roll, pitch, yaw, avel[0], avel[1], avel[2], rotor_duty_cycles[0], rotor_duty_cycles[1], rotor_duty_cycles[2], rotor_duty_cycles[3])
 
     for j in range(jmax):
-      vel = drone.getLinearVel()
-      avel = drone.getAngularVel()
-
-      # Estimate the acceleration and angular acceleration.
-      accel = differentiate(prev_vel, vel, dt)
-      prev_vel = vel
-
-      # Take sensor readings.
-      magneto = drone.vectorFromWorld((1.0, 0.0, 0.0))
-      readings = SensorReadings(drone.vectorFromWorld(accel), drone.vectorFromWorld(avel), magneto, dt)
-
-      # Run control algorithm.
-      rotor_duty_cycles = controller.update(readings, dt, drone)
-
-      # Apply rotor thrust to drone.
-      for duty_cycle, displacement in zip(rotor_duty_cycles, rotor_displacements):
-        # Thrust is 0.240*9.81 N at 50% throttle
-        thrust = 4.7088*duty_cycle
-        drone.addRelForceAtRelPos((0.0, thrust, 0.0), displacement)
-
-      # Apply drag to drone.
-      drag_factor = -0.1
-      drone.addForce((vel[0]*drag_factor, vel[1]*drag_factor, vel[2]*drag_factor))
-
-      world.step(dt)
+      rotor_duty_cycles = sim.update(dt)
 
 if __name__ == "__main__":
   main()
