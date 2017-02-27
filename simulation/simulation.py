@@ -143,7 +143,7 @@ def main():
   drone = ode.Body(world)
   drone_mass = ode.Mass()
   drone_mass.setSphere(150, 0.01) # model as a sphere with a radius of 10cm
-  drone_mass.adjust(0.150) # adjust mass to be exactly 150g
+  drone_mass.adjust(0.700) # adjust mass to be exactly 700g
   drone.setMass(drone_mass)
 
   drone.setPosition((0.0, 0.0, 0.0))
@@ -185,8 +185,8 @@ def main():
 
       # Apply rotor thrust to drone.
       for duty_cycle, displacement in zip(rotor_duty_cycles, rotor_displacements):
-        # Assume thrust is proportional to duty cycle
-        thrust = duty_cycle
+        # Thrust is 0.240*9.81 N at 50% throttle
+        thrust = 4.7088*duty_cycle
         drone.addRelForceAtRelPos((0.0, thrust, 0.0), displacement)
 
       # Apply drag to drone.
