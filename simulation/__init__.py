@@ -1,1 +1,1 @@
-from simulation.simulation import main
+from simulation.main import main
