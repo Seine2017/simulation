@@ -55,8 +55,8 @@ class SensorReadings(object):
     self.interval = interval
 
 class Differentiator(object):
-  def __init__(self):
-    self.prev = 0.0
+  def __init__(self, initial=0.0):
+    self.prev = initial
 
   def update(self, x, dt):
     deriv = (x - self.prev) / dt
@@ -90,15 +90,29 @@ class Integrator(object):
     self.integral += x * dt
     return self.integral
 
+class PID(object):
+  def __init__(self, kp, ki, kd):
+    self.kp = kp
+    self.ki = ki
+    self.kd = kd
+    self.integrator = Integrator()
+    self.differentiator = Differentiator()
+
+  def update(self, desired, measured, dt):
+    error = desired - measured
+    integral = self.integrator.update(error, dt)
+    derivative = self.differentiator.update(error, dt)
+    return self.kp*error + self.ki*integral + self.kd*derivative
+
 class Trajectory(object):
   def __init__(self):
     pass
 
   def xvel(self, t):
-    return 0.0
+    return 0.1
 
   def yvel(self, t):
-    return 1.0 if t > 2.0 and t < 3.0 else 0.0
+    return 0.0 #1.0 if t > 2.0 and t < 3.0 else 0.0
 
   def zvel(self, t):
     return 0.0
@@ -111,13 +125,12 @@ class Controller(object):
     self.trajectory = trajectory
     self.time = 0.0
 
+    self.pitchaccel_d = Differentiator()
     self.xvel_i = Integrator()
     self.yvel_i = Integrator()
 
-    self.xvel_error_d = Differentiator()
-    self.xvel_error_dd = Differentiator()
-    self.xvel_error_ddd = Differentiator()
-    self.yvel_error_i = Integrator()
+    self.xfactor_pid = PID(0.000005, 0.0, 0.0)
+    self.yfactor_pid = PID(20.0, 100.0, 0.0)
 
   def update(self, readings, dt, drone):
     """Takes sensor readings and returns PWM duty cycle applied to each rotor"""
@@ -125,14 +138,31 @@ class Controller(object):
     quaternion = drone.getQuaternion()
     accel = quaternion_rotate(quaternion, readings.accel)
 
-    xfactor = 0.0
+    # xaccel_measured = accel[0]
+    # xvel_measured = self.xvel_i.update(xaccel_measured, dt)
+    # xvel_desired = self.trajectory.xvel(self.time)
+    # xvel_error = xvel_desired - xvel_measured
+    # xvel_error_d = self.xvel_error_d.update(xvel_error, dt)
+    # xvel_error_dd = self.xvel_error_dd.update(xvel_error_d, dt)
+    # xvel_error_ddd = self.xvel_error_ddd.update(xvel_error_dd, dt)
+    # print xvel_error, xvel_error_d, xvel_error_dd, xvel_error_ddd
+    # #xfactor = 0.0005*xvel_error - 0.0000001*xvel_error_ddd
+    # w=100
+    # if self.time < math.pi*2/w:
+    #   xfactor = 0.015*(math.cos(w*self.time) + math.cos(2*w*self.time) + math.cos(3*w*self.time))
+    # else:
+    #   xfactor = 0.0
+    # print xfactor
+
+    pitchvel_measured = readings.gyro[2]
+    pitchaccel_measured = self.pitchaccel_d.update(pitchvel_measured, dt)
+    pitchvel_desired = 1.0
+    xfactor = self.xfactor_pid.update(pitchvel_desired, pitchvel_measured, dt)
 
     yaccel_measured = accel[1]
     yvel_measured = self.yvel_i.update(yaccel_measured, dt)
     yvel_desired = self.trajectory.yvel(self.time)
-    yvel_error = yvel_desired - yvel_measured
-    yvel_error_i = self.yvel_error_i.update(yvel_error, dt, min=0.0, max=1/100.0)
-    yfactor = 20.0*yvel_error + 100.0*yvel_error_i
+    yfactor = 0.0#self.yfactor_pid.update(yvel_desired, yvel_measured, dt)
 
     zfactor = 0.0
 
@@ -147,7 +177,7 @@ class Controller(object):
 
     self.time += dt
 
-    return tuple(duty_cycles)
+    return (xfactor, yfactor, zfactor, yawfactor), tuple(duty_cycles)
 
 class Simulation(object):
   def __init__(self):
@@ -179,7 +209,7 @@ class Simulation(object):
     readings = SensorReadings(self.drone.vectorFromWorld(accel), self.drone.vectorFromWorld(avel), magneto, dt)
 
     # Run control algorithm.
-    rotor_duty_cycles = self.controller.update(readings, dt, self.drone)
+    output_factors, rotor_duty_cycles = self.controller.update(readings, dt, self.drone)
 
     # Apply rotor thrust to drone.
     for duty_cycle, displacement in zip(rotor_duty_cycles, rotor_displacements):
@@ -193,15 +223,19 @@ class Simulation(object):
 
     self.world.step(dt)
 
-    return rotor_duty_cycles
+    return output_factors, rotor_duty_cycles
 
 def main():
   sim = Simulation()
 
-  imax = 60
-  jmax = 100
+  accel_d = VectorDifferentiator()
+  aaccel = (0.0, 0.0, 0.0)
+
+  imax = 50
+  jmax = 10
   dt = 1e-3
-  rotor_duty_cycles = (0.0, 0.0, 0.0, 0.0)
+  output_factors = (0.0, 0.0, 0.0, 0.0)
+  outputs = (0.0, 0.0, 0.0, 0.0)
   for i in range(imax):
     pos = sim.drone.getPosition()
     vel = sim.drone.getLinearVel()
@@ -212,10 +246,16 @@ def main():
     roll = quaternion_roll(quaternion)
     pitch = quaternion_pitch(quaternion)
     yaw = quaternion_yaw(quaternion)
-    print "t=%7.4f x=(%7.3f,%7.3f,%7.3f) v=(%7.3f,%7.3f,%7.3f) roll=%7.3f pitch=%7.3f yaw=%7.3f av=(%7.3f,%7.3f,%7.3f) out=(%.3f,%.3f,%.3f,%.3f)" % (dt*i*jmax, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], roll, pitch, yaw, avel[0], avel[1], avel[2], rotor_duty_cycles[0], rotor_duty_cycles[1], rotor_duty_cycles[2], rotor_duty_cycles[3])
+    print "t=%7.4f x=(%7.3f,%7.3f,%7.3f) v=(%7.3f,%7.3f,%7.3f) roll=%7.3f pitch=%7.3f yaw=%7.3f av=(%7.3f,%7.3f,%7.3f) aa=(%7.3f,%7.3f,%7.3f) out=(%11.8f,%5.2f,%11.8f,%11.8f)=>(%5.3f,%5.3f,%5.3f,%5.3f)" % (dt*i*jmax, pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], roll, pitch, yaw, avel[0], avel[1], avel[2], aaccel[0], aaccel[1], aaccel[2], output_factors[0], output_factors[1], output_factors[2], output_factors[3], outputs[0], outputs[1], outputs[2], outputs[3])
 
     for j in range(jmax):
-      rotor_duty_cycles = sim.update(dt)
+      output_factors, outputs = sim.update(dt)
+      up = sim.drone.vectorToWorld((0.0, 1.0, 0.0))
+      # if up[1] < 0.8:
+      #   print "Terminated due to instability."
+      #   return
+      avel = sim.drone.getAngularVel()
+      aaccel = accel_d.update(avel, dt)
 
 if __name__ == "__main__":
   main()
