@@ -10,12 +10,14 @@ rotor_displacements = [
 
 rotor_directions = [1, -1, 1, -1]
 
-def clamp_duty_cycle(x):
+def clamp_and_quantise_duty_cycle(x):
+  resolution = 256
   if x < 0.0:
-    return 0.0
+    x = 0.0
   if x > 1.0:
-    return 1.0
-  return x
+    x = 1.0
+  return round(x * (resolution - 1)) / (resolution - 1)
+  #return x
 
 def normalise(v):
   mag = math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
@@ -211,7 +213,7 @@ class Controller(object):
     yawvel_error_d = self.yawvel_error_d.update(yawvel_error, dt)
     yawfactor = 0.08738 * yawvel_error + 0.16883 * yawvel_error_i + 0.0011317 * yawvel_error_d
 
-    duty_cycles = map(clamp_duty_cycle, [
+    duty_cycles = map(clamp_and_quantise_duty_cycle, [
       yfactor - pitchfactor + rollfactor + yawfactor,
       yfactor - pitchfactor - rollfactor - yawfactor,
       yfactor + pitchfactor - rollfactor + yawfactor,
@@ -293,7 +295,7 @@ def main():
     roll = quaternion_roll(quaternion)
     pitch = quaternion_pitch(quaternion)
     yaw = quaternion_yaw(quaternion)
-    print "t=%7.4f out=(%5.3f,%11.8f,%11.8f,%11.8f)=>(%5.3f,%5.3f,%5.3f,%5.3f) x=(%7.3f,%7.3f,%7.3f) v=(%7.3f,%7.3f,%7.3f) roll=%7.3f pitch=%7.3f yaw=%7.3f av=(%7.3f,%7.3f,%7.3f) aa=(%7.3f,%7.3f,%7.3f)" % (dt*i*jmax, output_factors[0], output_factors[1], output_factors[2], output_factors[3], outputs[0], outputs[1], outputs[2], outputs[3], pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], roll, pitch, yaw, avel[0], avel[1], avel[2], aaccel[0], aaccel[1], aaccel[2])
+    print "t=%7.4f out=(%5.3f,%11.8f,%11.8f,%11.8f)=>(%6.4f,%6.4f,%6.4f,%6.4f) x=(%7.3f,%7.3f,%7.3f) v=(%7.3f,%7.3f,%7.3f) roll=%7.3f pitch=%7.3f yaw=%7.3f av=(%7.3f,%7.3f,%7.3f) aa=(%7.3f,%7.3f,%7.3f)" % (dt*i*jmax, output_factors[0], output_factors[1], output_factors[2], output_factors[3], outputs[0], outputs[1], outputs[2], outputs[3], pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], roll, pitch, yaw, avel[0], avel[1], avel[2], aaccel[0], aaccel[1], aaccel[2])
 
     for j in range(jmax):
       output_factors, outputs = sim.update(dt)
