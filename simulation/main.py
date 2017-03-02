@@ -11,7 +11,7 @@ rotor_displacements = [
 rotor_directions = [1, -1, 1, -1]
 
 def clamp_and_quantise_duty_cycle(x):
-  resolution = 256
+  resolution = 1000
   if x < 0.0:
     x = 0.0
   if x > 1.0:
@@ -127,7 +127,8 @@ class Trajectory(object):
     return 0.0
 
   def yvel(self, t):
-    return t/20.0
+    #return t/20.0
+    return 0.0
 
   def roll(self, t):
     if t < 5.0:
@@ -239,6 +240,9 @@ class Simulation(object):
     #self.drone.setQuaternion((0.8, 0.0, 0.0, -0.045))
 
     self.controller = Controller(Trajectory())
+    self.controller_ticks = 0
+    self.output_factors = None
+    self.rotor_duty_cycles = None
 
     self.vel_d = VectorDifferentiator()
 
@@ -254,10 +258,13 @@ class Simulation(object):
     readings = SensorReadings(self.drone.vectorFromWorld(accel), self.drone.vectorFromWorld(avel), magneto)
 
     # Run control algorithm.
-    output_factors, rotor_duty_cycles = self.controller.update(readings, dt)
+    if self.controller_ticks == 0:
+      self.output_factors, self.rotor_duty_cycles = self.controller.update(readings, dt*10)
+      self.controller_ticks = 10
+    self.controller_ticks -= 1
 
     # Apply rotor thrust to drone.
-    for duty_cycle, displacement, direction in zip(rotor_duty_cycles, rotor_displacements, rotor_directions):
+    for duty_cycle, displacement, direction in zip(self.rotor_duty_cycles, rotor_displacements, rotor_directions):
       # Thrust is 0.240*9.81 N at 50% throttle
       thrust = 4.7088*duty_cycle
       torque = 0.001*duty_cycle
@@ -272,7 +279,7 @@ class Simulation(object):
 
     self.world.step(dt)
 
-    return output_factors, rotor_duty_cycles
+    return self.output_factors, self.rotor_duty_cycles
 
 def main():
   sim = Simulation()
