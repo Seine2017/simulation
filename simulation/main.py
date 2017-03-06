@@ -15,6 +15,8 @@ def clamp_duty_cycle(x):
     return 0.0
   if x > 1.0:
     return 1.0
+  resolution = 256
+  #return round(x * (resolution - 1)) / (resolution - 1)
   return x
 
 def normalise(v):
@@ -117,23 +119,17 @@ class Trajectory(object):
 
   def pitch(self, t):
     if t < 5.0:
-      return 0.02*t/5.0
+      return 0.1*t/5.0
     if t < 25.0:
-      return 0.02
+      return 0.1
     if t < 30.0:
-      return 0.02*(30.0 - t)/5.0
+      return 0.1*(30.0 - t)/5.0
     return 0.0
 
   def yvel(self, t):
-    return t/20.0
+    return 0.0 #t/20.0
 
   def roll(self, t):
-    if t < 5.0:
-      return 0.02*t/5.0
-    if t < 25.0:
-      return 0.02
-    if t < 30.0:
-      return 0.02*(30.0 - t)/5.0
     return 0.0
 
   def yawvel(self, t):
@@ -278,7 +274,7 @@ def main():
   accel_d = VectorDifferentiator()
   aaccel = (0.0, 0.0, 0.0)
 
-  imax = 40
+  imax = 50
   jmax = 1000
   dt = 1e-3
   output_factors = (0.0, 0.0, 0.0, 0.0)
